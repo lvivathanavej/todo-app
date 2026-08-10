@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="To do">
+<meta name="theme-color" content="#ffffff">
+<title>To do</title>
+<link rel="icon" href="assets/app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/app-icon.svg">
+<link rel="stylesheet" href="styles.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <div id="listView" class="list-view">
+    <header>
+      <h1 id="listName">To do</h1>
+      <div class="header-right">
+        <span class="count" id="count"></span>
+        <button class="menu-btn" id="menuBtn" aria-label="Menu" title="Backup &amp; restore">
+          <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>
+        </button>
+        <div class="menu" id="menu" hidden>
+          <button id="exportBtn">Export backup...</button>
+          <button id="importBtn">Import backup...</button>
+        </div>
+      </div>
+    </header>
+    <div class="list" id="list"></div>
+  </div>
+  <input type="file" id="importFile" accept="application/json,.json" hidden>
+  <button class="fab" id="newBtn" aria-label="New item">+</button>
+  <div class="tabbar" id="tabbar"></div>
+</div>
+</body>
+</html>
