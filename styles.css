@@ -25,10 +25,18 @@ body {
 /* ---- Header ---- */
 header {
   padding: 22px 20px 14px;
-  display: flex; align-items: baseline; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
 }
 header h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; }
 header .count { color: var(--ink-soft); font-size: 14px; }
+.header-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.header-title h1 { cursor: pointer; border-radius: 10px; padding: 2px 4px; margin-left: -4px; }
+.header-title h1:hover { background: #f2f2f7; }
+.header-rename {
+  font-family: inherit; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink);
+  border: none; outline: none; background: #f2f2f7; border-radius: 10px;
+  padding: 2px 8px; width: min(280px, 58vw);
+}
 .header-right { display: flex; align-items: center; gap: 10px; position: relative; }
 .menu-btn {
   border: none; background: none; cursor: pointer; color: var(--ink-soft);

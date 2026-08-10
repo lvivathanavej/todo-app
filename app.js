@@ -6,34 +6,44 @@ const store = {
 
 const $ = id => document.getElementById(id);
 const list = $('list'), fab = $('newBtn'), tabbar = $('tabbar');
+const supabaseConfig = window.SUPABASE_CONFIG || {};
+const supabaseClient = window.supabase && supabaseConfig.url && supabaseConfig.publishableKey
+  ? window.supabase.createClient(supabaseConfig.url, supabaseConfig.publishableKey)
+  : null;
 
 function uid() { return String(Date.now()) + Math.random().toString(36).slice(2, 6); }
 
-// ---- Load or initialise the board ----
-let board = store.loadBoard();
-if (!board) {
-  // Migrate any pre-existing single list of notes into the first tab
+function createInitialBoard() {
   const legacy = store.loadLegacyNotes();
   const firstId = uid();
-  board = {
+  return {
     activeId: firstId,
     lists: [{ id: firstId, name: 'To do', items: Array.isArray(legacy) ? legacy : [] }]
   };
-  store.saveBoard(board);
 }
 
-// Normalise every item across every list
-board.lists.forEach(l => {
-  if (!l.name || !l.name.trim()) l.name = 'To do';
-  l.items = l.items || [];
-  l.items.forEach((n, i) => {
-    if (!n.status) n.status = 'awaiting';
-    if (!n.priority) n.priority = 'important';
-    if (!n.created) n.created = (n.updated || Date.now()) + i;
+function normaliseBoard(nextBoard) {
+  const fallback = createInitialBoard();
+  const normalised = nextBoard && Array.isArray(nextBoard.lists) ? nextBoard : fallback;
+  if (!normalised.lists.length) normalised.lists.push(fallback.lists[0]);
+  normalised.lists.forEach(l => {
+    if (!l.id) l.id = uid();
+    if (!l.name || !l.name.trim()) l.name = 'To do';
+    l.items = l.items || [];
+    l.items.forEach((n, i) => {
+      if (!n.id) n.id = uid();
+      if (!n.status) n.status = 'awaiting';
+      if (!n.priority) n.priority = 'important';
+      if (!n.created) n.created = (n.updated || Date.now()) + i;
+      if (!n.updated) n.updated = n.created;
+    });
   });
-});
+  if (!normalised.lists.some(l => l.id === normalised.activeId)) normalised.activeId = normalised.lists[0].id;
+  return normalised;
+}
+
+let board = normaliseBoard(store.loadBoard());
 store.saveBoard(board);
-if (!board.lists.some(l => l.id === board.activeId)) board.activeId = board.lists[0].id;
 
 function activeList() { return board.lists.find(l => l.id === board.activeId) || board.lists[0]; }
 function save() { store.saveBoard(board); }
@@ -44,7 +54,6 @@ const CYCLE = {
 };
 const STATUS_LABEL = { awaiting: 'Awaiting', action: 'Action', done: 'Done' };
 const PRIORITY_LABEL = { none: '-', urgent: 'Urgent', important: 'Important', urgent_important: 'Critical' };
-// Inline SVG icons (white stroke/fill, sized to the circle). 'none' renders as an empty circle.
 const ICONS = {
   none: '',
   urgent: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="7"></circle><path d="M12 10v3l2 1.5"></path><path d="M9 2h6"></path></svg>',
@@ -63,6 +72,7 @@ function segButtons(kind, current, labels) {
     `<button data-val="${val}" class="${current === val ? 'on' : ''}" title="${esc(labels[val])}" aria-label="${esc(labels[val])}">${ICONS[val] || ''}</button>`
   ).join('');
 }
+
 function cardToggles(n) {
   return `<div class="toggles card-toggles">
     <div class="seg priority" data-kind="priority">${segButtons('priority', n.priority, PRIORITY_LABEL)}</div>
@@ -70,11 +80,29 @@ function cardToggles(n) {
   </div>`;
 }
 
-// ================= Item list =================
+function renderHeaderTitle() {
+  const l = activeList();
+  const current = $('listName');
+  if (!current) return;
+  const title = l.name || 'Untitled';
+  if (current.tagName === 'INPUT') {
+    const h1 = document.createElement('h1');
+    h1.id = 'listName';
+    h1.title = 'Rename list';
+    h1.textContent = title;
+    h1.onclick = startHeaderRename;
+    current.replaceWith(h1);
+    return;
+  }
+  current.textContent = title;
+  current.title = 'Rename list';
+  current.onclick = startHeaderRename;
+}
+
 function renderList() {
   const l = activeList();
   const notes = l.items;
-  $('listName').textContent = l.name || 'Untitled';
+  renderHeaderTitle();
 
   const PRIORITY_RANK = { urgent_important: 0, urgent: 1, important: 2, none: 3 };
   const STATUS_RANK = { done: 0, action: 1, awaiting: 2 };
@@ -120,13 +148,8 @@ function renderList() {
       const seg = btn.closest('.seg');
       const id = btn.closest('.note-card').dataset.id;
       const kind = seg.dataset.kind;
-      if (!seg.classList.contains('expanded')) {
-        // First tap on the collapsed icon: open the option row
-        expandSeg(seg);
-      } else {
-        // Tap on an option: apply it, collapse, re-sort, highlight
-        setField(id, kind, btn.dataset.val);
-      }
+      if (!seg.classList.contains('expanded')) expandSeg(seg);
+      else setField(id, kind, btn.dataset.val);
     });
   });
   list.querySelectorAll('.del-btn').forEach(btn => {
@@ -137,7 +160,6 @@ function renderList() {
     });
   });
 
-  // Highlight the item that just moved, so the eye can follow it
   if (justMovedId) {
     const moved = list.querySelector(`.note-card[data-id="${justMovedId}"]`);
     if (moved) {
@@ -149,7 +171,6 @@ function renderList() {
   }
 }
 
-// ---- Two-step delete for items ----
 let armedBtn = null, armTimer = null;
 function armDelete(btn) {
   disarmDelete();
@@ -158,6 +179,7 @@ function armDelete(btn) {
   armedBtn = btn;
   armTimer = setTimeout(disarmDelete, 3000);
 }
+
 function disarmDelete() {
   clearTimeout(armTimer);
   if (armedBtn && armedBtn.isConnected) {
@@ -166,6 +188,7 @@ function disarmDelete() {
   }
   armedBtn = null;
 }
+
 document.addEventListener('click', e => {
   if (armedBtn && !e.target.closest('.del-btn')) disarmDelete();
 });
@@ -177,23 +200,32 @@ function deleteItem(id) {
   save();
   renderList();
   renderTabs();
+  deleteRemoteItem(id);
 }
+
+let typingUntil = 0;
 function setTitle(id, val) {
   const n = activeList().items.find(x => x.id === id);
   if (!n) return;
-  n.title = val; n.updated = Date.now(); save();
+  n.title = val;
+  n.updated = Date.now();
+  typingUntil = Date.now() + 800;
+  save();
+  queueRemoteItemUpsert(id);
 }
+
 let expandedSeg = null;
 function expandSeg(seg) {
   collapseSegs();
   seg.classList.add('expanded');
   expandedSeg = seg;
 }
+
 function collapseSegs() {
   if (expandedSeg && expandedSeg.isConnected) expandedSeg.classList.remove('expanded');
   expandedSeg = null;
 }
-// Tapping anywhere else closes an open option row
+
 document.addEventListener('click', e => {
   if (expandedSeg && !e.target.closest('.seg.expanded')) collapseSegs();
 });
@@ -203,26 +235,29 @@ function setField(id, kind, val) {
   const n = activeList().items.find(x => x.id === id);
   if (!n) return;
   collapseSegs();
-  if (n[kind] === val) return; // no change; just close
+  if (n[kind] === val) return;
   n[kind] = val;
   n.updated = Date.now();
   save();
-  justMovedId = id;           // remember which row to highlight after re-sort
+  justMovedId = id;
   renderList();
   renderTabs();
+  upsertRemoteItem(n, activeList().id);
 }
+
 function newNote() {
   const now = Date.now();
+  const l = activeList();
   const n = { id: uid(), title: '', updated: now, created: now, status: 'action', priority: 'none' };
-  activeList().items.push(n);
+  l.items.push(n);
   save();
   renderList();
   renderTabs();
+  upsertRemoteItem(n, l.id);
   const inp = list.querySelector(`input.title[data-id="${n.id}"]`);
   if (inp) { inp.focus(); inp.closest('.note-row').scrollIntoView({ block: 'center', behavior: 'smooth' }); }
 }
 
-// ================= Tabs =================
 function renderTabs() {
   tabbar.innerHTML = board.lists.map(l => {
     const active = l.id === board.activeId;
@@ -251,7 +286,6 @@ function renderTabs() {
 
   tabbar.querySelectorAll('.tab').forEach(tab => {
     const id = tab.dataset.id;
-    // Single tap: switch. Tap on already-active tab name: rename.
     tab.querySelector('.tab-name').addEventListener('click', e => {
       e.stopPropagation();
       if (id === board.activeId) startRename(tab, id);
@@ -263,8 +297,6 @@ function renderTabs() {
   });
   $('tabAdd').addEventListener('click', addList);
 
-  // Bring the active tab into view by scrolling ONLY the tab bar horizontally.
-  // (scrollIntoView would scroll ancestor containers too, causing layout jumps on mobile.)
   const activeTab = tabbar.querySelector('.tab.active');
   if (activeTab) {
     const barRect = tabbar.getBoundingClientRect();
@@ -278,8 +310,10 @@ function renderTabs() {
 }
 
 function switchTo(id) {
-  board.activeId = id; save();
-  renderList(); renderTabs();
+  board.activeId = id;
+  save();
+  renderList();
+  renderTabs();
 }
 
 function addList() {
@@ -288,6 +322,7 @@ function addList() {
   board.activeId = l.id;
   save();
   renderList(); renderTabs();
+  upsertRemoteList(l, board.lists.length - 1);
 }
 
 function startRename(tab, id) {
@@ -300,17 +335,56 @@ function startRename(tab, id) {
   input.value = l.name || '';
   nameEl.replaceWith(input);
   input.focus(); input.select();
+  let finished = false;
   const commit = () => {
-    const v = input.value.trim();
-    l.name = v || 'To do';
-    save();
+    finished = true;
+    commitListName(l, input.value);
+  };
+  const cancel = () => {
+    if (finished) return;
+    finished = true;
     renderList(); renderTabs();
   };
-  input.addEventListener('blur', commit);
+  input.addEventListener('blur', cancel);
   input.addEventListener('keydown', e => {
-    if (e.key === 'Enter') input.blur();
-    if (e.key === 'Escape') { input.value = l.name || ''; input.blur(); }
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
   });
+}
+
+function startHeaderRename() {
+  const l = activeList();
+  const titleEl = $('listName');
+  if (!l || !titleEl || titleEl.tagName === 'INPUT') return;
+  const input = document.createElement('input');
+  input.id = 'listName';
+  input.className = 'header-rename';
+  input.type = 'text';
+  input.value = l.name || '';
+  titleEl.replaceWith(input);
+  input.focus(); input.select();
+  let finished = false;
+  const commit = () => {
+    finished = true;
+    commitListName(l, input.value);
+  };
+  const cancel = () => {
+    if (finished) return;
+    finished = true;
+    renderList(); renderTabs();
+  };
+  input.addEventListener('blur', cancel);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+  });
+}
+
+function commitListName(l, value) {
+  l.name = value.trim() || 'To do';
+  save();
+  renderList(); renderTabs();
+  upsertRemoteList(l, board.lists.findIndex(x => x.id === l.id));
 }
 
 function confirmDeleteList(id) {
@@ -327,14 +401,13 @@ function confirmDeleteList(id) {
   if (!confirm(msg)) return;
   const idx = board.lists.findIndex(x => x.id === id);
   board.lists = board.lists.filter(x => x.id !== id);
-  // pick a neighbouring tab to activate
   const next = board.lists[Math.max(0, idx - 1)];
   board.activeId = next.id;
   save();
   renderList(); renderTabs();
+  deleteRemoteList(id);
 }
 
-// ================= Backup: export / import =================
 const menu = $('menu'), menuBtn = $('menuBtn'), importFile = $('importFile');
 
 menuBtn.addEventListener('click', e => {
@@ -361,43 +434,206 @@ function exportBackup() {
 
 function importBackup() {
   menu.hidden = true;
-  importFile.value = ''; // allow re-importing the same file name
+  importFile.value = '';
   importFile.click();
 }
 importFile.addEventListener('change', () => {
   const file = importFile.files && importFile.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     let data;
-    try { data = JSON.parse(reader.result); } catch { alert('That file isn\u2019t a valid backup.'); return; }
-    const incoming = data && data.board ? data.board : data; // accept raw board too
-    if (!incoming || !Array.isArray(incoming.lists)) { alert('That file isn\u2019t a recognised To do backup.'); return; }
+    try { data = JSON.parse(reader.result); } catch { alert('That file is not a valid backup.'); return; }
+    const incoming = data && data.board ? data.board : data;
+    if (!incoming || !Array.isArray(incoming.lists)) { alert('That file is not a recognised To do backup.'); return; }
     const listCount = incoming.lists.length;
     const itemCount = incoming.lists.reduce((s, l) => s + ((l.items && l.items.length) || 0), 0);
     if (!confirm(`Import ${listCount} list${listCount !== 1 ? 's' : ''} with ${itemCount} item${itemCount !== 1 ? 's' : ''}?\n\nThis replaces everything currently on this device.`)) return;
-    board = incoming;
-    // normalise imported data
-    board.lists.forEach(l => {
-      l.items = l.items || [];
-      l.items.forEach((n, i) => {
-        if (!n.id) n.id = uid();
-        if (!n.status) n.status = 'action';
-        if (!n.priority) n.priority = 'none';
-        if (!n.created) n.created = (n.updated || Date.now()) + i;
-      });
-    });
-    if (!board.lists.length) { const fid = uid(); board.lists = [{ id: fid, name: 'To do', items: [] }]; board.activeId = fid; }
-    if (!board.lists.some(l => l.id === board.activeId)) board.activeId = board.lists[0].id;
+    board = normaliseBoard(incoming);
     save();
     renderList(); renderTabs();
+    await replaceRemoteBoard(board);
   };
   reader.readAsText(file);
 });
 
+function itemRow(n, listId) {
+  return {
+    id: n.id,
+    list_id: listId,
+    title: n.title || '',
+    status: n.status || 'action',
+    priority: n.priority || 'none',
+    created: n.created || Date.now(),
+    updated: n.updated || Date.now()
+  };
+}
+
+function listRow(l, position) {
+  return {
+    id: l.id,
+    name: l.name || 'To do',
+    position,
+    updated_at: new Date().toISOString()
+  };
+}
+
+function reportRemoteError(label, error) {
+  if (error) console.error(`${label}:`, error.message || error);
+}
+
+async function loadRemoteBoard() {
+  const { data: remoteLists, error: listsError } = await supabaseClient
+    .from('todo_lists')
+    .select('*')
+    .order('position', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (listsError) throw listsError;
+
+  const { data: remoteItems, error: itemsError } = await supabaseClient
+    .from('todo_items')
+    .select('*')
+    .order('created', { ascending: true });
+  if (itemsError) throw itemsError;
+
+  const itemsByList = new Map();
+  (remoteItems || []).forEach(item => {
+    const items = itemsByList.get(item.list_id) || [];
+    items.push({
+      id: item.id,
+      title: item.title || '',
+      status: item.status || 'action',
+      priority: item.priority || 'none',
+      created: item.created,
+      updated: item.updated
+    });
+    itemsByList.set(item.list_id, items);
+  });
+
+  const lists = (remoteLists || []).map(l => ({
+    id: l.id,
+    name: l.name || 'To do',
+    items: itemsByList.get(l.id) || []
+  }));
+  return { activeId: board.activeId, lists };
+}
+
+async function refreshFromRemote() {
+  if (!supabaseClient) return;
+  try {
+    const remoteBoard = await loadRemoteBoard();
+    if (!remoteBoard.lists.length) return;
+    board = normaliseBoard(remoteBoard);
+    save();
+    renderList();
+    renderTabs();
+  } catch (error) {
+    reportRemoteError('Could not load Supabase data', error);
+  }
+}
+
+let reloadTimer = null;
+function scheduleRemoteReload() {
+  clearTimeout(reloadTimer);
+  const delay = Date.now() < typingUntil ? 900 : 150;
+  reloadTimer = setTimeout(refreshFromRemote, delay);
+}
+
+async function upsertRemoteList(l, position) {
+  if (!supabaseClient) return;
+  const { error } = await supabaseClient.from('todo_lists').upsert(listRow(l, position));
+  reportRemoteError('Could not save list', error);
+}
+
+async function deleteRemoteList(id) {
+  if (!supabaseClient) return;
+  const { error } = await supabaseClient.from('todo_lists').delete().eq('id', id);
+  reportRemoteError('Could not delete list', error);
+}
+
+async function upsertRemoteItem(n, listId) {
+  if (!supabaseClient) return;
+  const { error } = await supabaseClient.from('todo_items').upsert(itemRow(n, listId));
+  reportRemoteError('Could not save item', error);
+}
+
+async function deleteRemoteItem(id) {
+  if (!supabaseClient) return;
+  const { error } = await supabaseClient.from('todo_items').delete().eq('id', id);
+  reportRemoteError('Could not delete item', error);
+}
+
+const queuedItemUpserts = new Map();
+function queueRemoteItemUpsert(id) {
+  if (!supabaseClient) return;
+  clearTimeout(queuedItemUpserts.get(id));
+  queuedItemUpserts.set(id, setTimeout(() => {
+    queuedItemUpserts.delete(id);
+    for (const l of board.lists) {
+      const item = l.items.find(n => n.id === id);
+      if (item) {
+        upsertRemoteItem(item, l.id);
+        return;
+      }
+    }
+  }, 400));
+}
+
+async function replaceRemoteBoard(nextBoard) {
+  if (!supabaseClient) return;
+  try {
+    let response = await supabaseClient.from('todo_items').delete().neq('id', '__never__');
+    if (response.error) throw response.error;
+    response = await supabaseClient.from('todo_lists').delete().neq('id', '__never__');
+    if (response.error) throw response.error;
+
+    const listRows = nextBoard.lists.map((l, index) => listRow(l, index));
+    response = await supabaseClient.from('todo_lists').insert(listRows);
+    if (response.error) throw response.error;
+
+    const itemRows = nextBoard.lists.flatMap(l => l.items.map(n => itemRow(n, l.id)));
+    if (itemRows.length) {
+      response = await supabaseClient.from('todo_items').insert(itemRows);
+      if (response.error) throw response.error;
+    }
+  } catch (error) {
+    reportRemoteError('Could not replace Supabase data', error);
+  }
+}
+
+async function initialiseRemote() {
+  if (!supabaseClient) {
+    console.warn('Supabase is not configured. The app is using localStorage only.');
+    return;
+  }
+
+  try {
+    const remoteBoard = await loadRemoteBoard();
+    if (remoteBoard.lists.length) {
+      board = normaliseBoard(remoteBoard);
+      save();
+      renderList();
+      renderTabs();
+    } else {
+      await replaceRemoteBoard(board);
+    }
+
+    supabaseClient
+      .channel('todo-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'todo_lists' }, scheduleRemoteReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'todo_items' }, scheduleRemoteReload)
+      .subscribe(status => {
+        if (status === 'CHANNEL_ERROR') console.error('Supabase realtime subscription failed.');
+      });
+  } catch (error) {
+    reportRemoteError('Supabase initialisation failed', error);
+  }
+}
+
 $('exportBtn').addEventListener('click', exportBackup);
 $('importBtn').addEventListener('click', importBackup);
-
 fab.addEventListener('click', newNote);
+
 renderList();
 renderTabs();
+initialiseRemote();

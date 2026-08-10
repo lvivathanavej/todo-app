@@ -11,13 +11,17 @@
 <link rel="icon" href="assets/app-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/app-icon.svg">
 <link rel="stylesheet" href="styles.css">
+<script src="env.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
 <script src="app.js" defer></script>
 </head>
 <body>
 <div class="app">
   <div id="listView" class="list-view">
     <header>
-      <h1 id="listName">To do</h1>
+      <div class="header-title">
+        <h1 id="listName" title="Rename list">To do</h1>
+      </div>
       <div class="header-right">
         <span class="count" id="count"></span>
         <button class="menu-btn" id="menuBtn" aria-label="Menu" title="Backup &amp; restore">
