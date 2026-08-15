@@ -21,6 +21,7 @@ const STATUS_LABEL = { awaiting: 'Awaiting', action: 'Action', done: 'Done' };
 const PRIORITY_LABEL = { none: 'No priority', urgent: 'Urgent', important: 'Important', urgent_important: 'Critical' };
 const CYCLE = { status: ['action', 'awaiting', 'done'], priority: ['none', 'important', 'urgent', 'urgent_important'] };
 const USER_TAB_COLORS = ['#bd5b67', '#3b8f87', '#6576c5', '#bd8740', '#9b639b', '#4f83b7'];
+const SWIPE_DELETE_RATIO = 0.15;
 const ICONS = {
   none: '',
   urgent: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="7"></circle><path d="M12 10v3l2 1.5"></path><path d="M9 2h6"></path></svg>',
@@ -38,7 +39,7 @@ function reportRemoteError(label, error) { if (error) console.error(`${label}:`,
 
 function fromLegacyBoard(board) {
   if (!board || !Array.isArray(board.lists)) return { users: [], lists: [], items: [] };
-  const user = { id: 1, name: 'USER1', deletionAt: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  const user = { id: 1, name: 'USER', deletionAt: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   const legacyLists = board.lists.map((entry, position) => ({ entry, id: entry.id || uid(), position }));
   return {
     users: [user],
@@ -65,7 +66,6 @@ const state = {
   pendingRefresh: false,
   reloadTimer: null,
   requestVersion: 0,
-  longPress: null,
   contextItemId: null
 };
 
@@ -165,15 +165,16 @@ function renderEmpty(kind) {
   const copy = {
     users: ['No users yet', 'Create a user to start organizing to dos.', 'Add user'],
     lists: ['No lists yet', 'Create a list for this user to add to dos.', 'Add list'],
-    items: ['No items yet', 'Create a to do to get started.', 'Add item']
+    items: ['No items yet', 'Create a to do to get started.']
   }[kind];
   fab.hidden = kind !== 'items';
-  list.innerHTML = `<section class="state-card"><div class="state-icon">+</div><strong>${copy[0]}</strong><p>${copy[1]}</p><button class="state-action" data-action="${kind === 'users' ? 'add-user' : kind === 'lists' ? 'add-list' : 'add-item'}">${copy[2]}</button></section>`;
-  list.querySelector('.state-action').addEventListener('click', event => {
+  const action = kind === 'users' ? 'add-user' : 'add-list';
+  const actionButton = kind === 'items' ? '' : `<div class="state-icon">+</div><button class="state-action" data-action="${action}">${copy[2]}</button>`;
+  list.innerHTML = `<section class="state-card">${actionButton}<strong>${copy[0]}</strong><p>${copy[1]}</p></section>`;
+  list.querySelector('.state-action')?.addEventListener('click', event => {
     const action = event.currentTarget.dataset.action;
     if (action === 'add-user') addUser();
     if (action === 'add-list') addList();
-    if (action === 'add-item') newNote();
   });
 }
 
@@ -252,6 +253,7 @@ function renderListItems() {
   if (!notes.length) return renderEmpty('items');
   fab.hidden = false;
   list.innerHTML = notes.map(item => `<div class="note-row">
+    <button class="swipe-delete" data-id="${esc(item.id)}" aria-label="Delete item">Delete</button>
     <div class="note-card${item.status === 'done' ? ' done' : ''}" data-id="${esc(item.id)}" tabindex="0">
       <div class="card-text"><input class="title" type="text" value="${esc(item.title)}" placeholder="New item" data-id="${esc(item.id)}"></div>
       ${cardToggles(item)}
@@ -260,6 +262,7 @@ function renderListItems() {
 
   list.querySelectorAll('input.title').forEach(input => bindTitleEditor(input));
   list.querySelectorAll('.note-card').forEach(card => bindItemMenu(card));
+  list.querySelectorAll('.swipe-delete').forEach(button => button.addEventListener('click', () => deleteItem(button.dataset.id)));
   list.querySelectorAll('.seg button').forEach(button => button.addEventListener('click', event => {
     event.stopPropagation();
     commitActiveEditor();
@@ -318,9 +321,7 @@ function canOpenItemMenu(target) {
   return !target.closest('.seg');
 }
 
-function canStartItemLongPress(target) {
-  return !target.closest('input, .seg');
-}
+function usesTouchItemActions() { return window.matchMedia('(pointer: coarse)').matches; }
 
 function bindItemMenu(card) {
   // Stop a secondary click from focusing the title input before contextmenu fires.
@@ -331,31 +332,13 @@ function bindItemMenu(card) {
     if (event.button === 2) event.preventDefault();
   });
   card.addEventListener('contextmenu', event => {
+    if (usesTouchItemActions()) return;
     if (!canOpenItemMenu(event.target)) return;
     event.preventDefault();
     commitActiveEditor();
     openItemMenu(card.dataset.id, event.clientX, event.clientY);
   });
-  card.addEventListener('pointerdown', event => {
-    if (event.pointerType === 'mouse' || !canStartItemLongPress(event.target)) return;
-    cancelLongPress();
-    state.longPress = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, card };
-    state.longPress.timer = setTimeout(() => {
-      const press = state.longPress;
-      if (!press) return;
-      state.longPress = null;
-      commitActiveEditor();
-      openItemMenu(card.dataset.id, press.startX, press.startY);
-      if (navigator.vibrate) navigator.vibrate(10);
-    }, 500);
-  });
-  card.addEventListener('pointermove', event => {
-    const press = state.longPress;
-    if (!press || press.pointerId !== event.pointerId) return;
-    if (Math.hypot(event.clientX - press.startX, event.clientY - press.startY) > 10) cancelLongPress();
-  });
-  card.addEventListener('pointerup', cancelLongPress);
-  card.addEventListener('pointercancel', cancelLongPress);
+  bindSwipeDelete(card);
   card.addEventListener('keydown', event => {
     if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
     event.preventDefault();
@@ -364,15 +347,46 @@ function bindItemMenu(card) {
   });
 }
 
-function cancelLongPress() {
-  if (!state.longPress) return;
-  clearTimeout(state.longPress.timer);
-  state.longPress = null;
+function bindSwipeDelete(card) {
+  let gesture;
+  const row = card.closest('.note-row');
+  card.addEventListener('pointerdown', event => {
+    if (!usesTouchItemActions() || event.pointerType !== 'touch' || event.target.closest('.seg')) return;
+    list.querySelectorAll('.note-row.swipe-open').forEach(entry => {
+      if (entry !== row) entry.classList.remove('swipe-open');
+    });
+    const input = event.target.closest('input.title');
+    if (input) event.preventDefault();
+    const width = row.clientWidth * SWIPE_DELETE_RATIO;
+    row.classList.add('swiping');
+    gesture = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, offset: row.classList.contains('swipe-open') ? -width : 0, width, input };
+    card.setPointerCapture(event.pointerId);
+  });
+  card.addEventListener('pointermove', event => {
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const x = event.clientX - gesture.startX;
+    const y = event.clientY - gesture.startY;
+    if (Math.abs(y) > Math.abs(x) && Math.abs(y) > 8) { gesture = null; return; }
+    if (x >= 0 && !gesture.offset) return;
+    event.preventDefault();
+    card.style.transform = `translateX(${Math.max(-gesture.width, Math.min(0, gesture.offset + x))}px)`;
+  });
+  const finish = event => {
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const offset = gesture.offset + event.clientX - gesture.startX;
+    const input = gesture.input;
+    card.style.transform = '';
+    row.classList.remove('swiping');
+    row.classList.toggle('swipe-open', offset < -gesture.width / 2);
+    gesture = null;
+    if (input && Math.abs(offset) < 8) input.focus();
+  };
+  card.addEventListener('pointerup', finish);
+  card.addEventListener('pointercancel', () => { card.style.transform = ''; row.classList.remove('swiping'); gesture = null; });
 }
 
 function openItemMenu(id, x, y) {
   if (!state.items.some(entry => entry.id === id)) return;
-  cancelLongPress();
   state.contextItemId = id;
   $('itemMenuDelete').textContent = 'Delete item';
   itemMenu.hidden = false;
@@ -491,7 +505,7 @@ function commitListName(entry, value) {
 }
 
 function commitUserName(user, value) {
-  user.name = value.trim() || `USER${user.id}`;
+  user.name = value.trim() || 'USER';
   user.updatedAt = new Date().toISOString();
   upsertRemoteUser(user);
 }
@@ -515,7 +529,7 @@ async function addUser() {
   const listId = uid();
   if (!supabaseClient) {
     const id = Math.max(0, ...state.users.map(user => user.id)) + 1;
-    state.users.push({ id, name: `USER${id}`, deletionAt: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    state.users.push({ id, name: 'USER', deletionAt: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     state.lists.push({ id: listId, userId: id, name: 'To do', position: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
     setSelection(id, listId);
     render();
@@ -767,6 +781,7 @@ document.addEventListener('click', event => {
   if (!event.target.closest('.seg')) list.querySelectorAll('.seg.expanded').forEach(entry => entry.classList.remove('expanded'));
   if (!event.target.closest('.header-right')) $('menu').hidden = true;
   if (!event.target.closest('.item-menu')) closeItemMenu();
+  if (!event.target.closest('.swipe-delete')) list.querySelectorAll('.note-row.swipe-open').forEach(entry => entry.classList.remove('swipe-open'));
 });
 document.addEventListener('keydown', event => { if (event.key === 'Escape') closeItemMenu(); });
 list.addEventListener('scroll', closeItemMenu, { passive: true });
