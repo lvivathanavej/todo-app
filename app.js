@@ -79,6 +79,12 @@ function activeUser() {
   return state.users.find(user => user.id === selected) || state.users[0] || null;
 }
 
+function updateActiveUserTint() {
+  const user = activeUser();
+  const index = user ? state.users.indexOf(user) : 0;
+  document.documentElement.style.setProperty('--active-user-color', user ? USER_TAB_COLORS[index % USER_TAB_COLORS.length] : '#ffffff');
+}
+
 function visibleLists() {
   const user = activeUser();
   if (!user) return [];
@@ -269,6 +275,7 @@ function renderListItems() {
 
 function render() {
   if (!state.hydrated) return renderLoading();
+  updateActiveUserTint();
   renderUserbar();
   const user = activeUser();
   if (!user) {

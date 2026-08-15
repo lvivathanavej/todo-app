@@ -7,19 +7,20 @@
   --line: #e5e5ea;
   --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 6px 20px rgba(0,0,0,0.05);
   --tabbar-h: 62px;
+  --active-user-color: #ffffff;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; }
 body {
-  background: var(--paper);
+  background: color-mix(in srgb, var(--active-user-color) 5%, var(--paper));
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
   overflow: hidden;
 }
 
-.app { max-width: 720px; margin: 0 auto; height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+.app { max-width: 720px; margin: 0 auto; height: 100vh; height: 100dvh; display: flex; flex-direction: column; background: color-mix(in srgb, var(--active-user-color) 5%, var(--paper)); }
 .list-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 /* ---- Users ---- */
@@ -39,14 +40,14 @@ body {
 .user-tab {
   --user-color: var(--accent);
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 118px; min-height: 34px; margin: 0;
-  padding: 0 15px 1px; border: 1px solid var(--user-color); border-bottom: none;
+  padding: 0 15px 1px; border: none;
   border-radius: 11px 11px 0 0; background: color-mix(in srgb, var(--user-color) 28%, white);
   color: var(--user-color); font-size: 13px; font-weight: 700; opacity: 1;
   transition: min-height .15s ease, transform .15s ease, opacity .15s ease, box-shadow .15s ease;
 }
 .user-tab:hover { opacity: 1; z-index: 1; }
 .user-tab.active {
-  min-height: 42px; margin-bottom: -1px; padding-bottom: 3px; border-width: 2px; border-bottom-color: var(--user-color);
+  min-height: 42px; margin-bottom: -1px; padding-bottom: 3px;
   background: var(--user-color); color: #fff; opacity: 1; transform: translateY(1px) scaleX(1.06); z-index: 2;
   box-shadow: 0 -4px 13px color-mix(in srgb, var(--user-color) 22%, transparent);
 }
@@ -199,7 +200,7 @@ header .count { color: var(--ink-soft); font-size: 14px; }
   flex-shrink: 0; display: flex; align-items: center; gap: 6px;
   height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
   padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
-  background: var(--paper);
+  background: color-mix(in srgb, var(--active-user-color) 5%, var(--paper));
   overflow-x: auto; -webkit-overflow-scrolling: touch;
 }
 .tabbar::-webkit-scrollbar { display: none; }
